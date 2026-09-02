@@ -7,7 +7,6 @@ permission request directly from Discord with **Once / Always / Reject**
 buttons, without touching the keyboard.
 
 Both notify-only and the interactive buttons are built and live-tested.
-See `summary.md` for the full design and the empirical testing behind it.
 
 ## What it notifies on
 
@@ -18,8 +17,8 @@ See `summary.md` for the full design and the empirical testing behind it.
   for you.
 - **Pending questions** (OpenCode's built-in `question` tool) — notify
   only, permanently. There is no API to answer these from outside the
-  OpenCode process (confirmed by live testing, not assumed — see
-  `summary.md`), so this one always has to be answered from the keyboard.
+  OpenCode process (confirmed by live testing, not assumed), so this one
+  always has to be answered from the keyboard.
 
 ## Prerequisites
 
@@ -93,9 +92,3 @@ absolute path in `opencode.json`'s `plugin` array instead of a package
 name — confirmed to correctly resolve this package's own `node_modules`
 via normal Node module resolution, no bundling required.
 
-## Design notes
-
-See `summary.md` in this folder for the full design writeup and the
-empirical test results it's based on — several assumptions from OpenCode's
-public docs turned out to be wrong when checked against the real running
-server, and that's documented there rather than just fixed silently.

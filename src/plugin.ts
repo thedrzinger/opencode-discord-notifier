@@ -14,12 +14,12 @@ import {
 const SERVICE = "opencode-discord-notifier";
 
 // client.tui.* calls (e.g. showToast) block indefinitely with no real TUI
-// attached — confirmed live, the same behavior found earlier for
-// client.tui.control.next() (see summary.md). A plain .catch() does NOT
-// protect against this, since the promise never rejects, it just never
-// resolves. Any client.tui.* call from this plugin MUST be raced against
-// a hard timeout, or a headless/API-driven session (or a TUI that hasn't
-// finished attaching yet) can hang plugin initialization forever.
+// attached — confirmed live for both showToast and tui.control.next(). A
+// plain .catch() does NOT protect against this, since the promise never
+// rejects, it just never resolves. Any client.tui.* call from this plugin
+// MUST be raced against a hard timeout, or a headless/API-driven session
+// (or a TUI that hasn't finished attaching yet) can hang plugin
+// initialization forever.
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
   return Promise.race([promise, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
 }
@@ -82,8 +82,8 @@ export const DiscordNotifierPlugin: Plugin = async ({ project, directory, worktr
   const notifiedQuestionIds = new Set<string>();
   // Permission IDs this specific plugin instance actually sent a
   // notification for. Discord broadcasts every button click to every
-  // connected session on this bot token (confirmed live, see summary.md),
-  // so this set is what lets each concurrent `opencode` session only act
+  // connected session on this bot token (confirmed live), so this set is
+  // what lets each concurrent `opencode` session only act
   // on its own pending permissions. Entries are kept for the process's
   // lifetime (not deleted after one click) so a second/duplicate click on
   // an already-answered permission still routes through the real API call
@@ -156,8 +156,8 @@ export const DiscordNotifierPlugin: Plugin = async ({ project, directory, worktr
   return {
     // `event` is typed loosely here on purpose: live testing showed the
     // real server emits event types ("permission.asked", "question.asked")
-    // that don't appear in @opencode-ai/sdk's published Event union at all
-    // — see summary.md. Matching on the raw string is the reliable path.
+    // that don't appear in @opencode-ai/sdk's published Event union at
+    // all. Matching on the raw string is the reliable path.
     async event(input: { event: { type: string; properties?: any } }) {
       const event = input.event;
       try {
