@@ -1,0 +1,37 @@
+{
+  "name": "opencode-discord-notifier",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that sends Discord notifications for pending permissions, questions, and idle sessions, with buttons to answer permissions directly from Discord.",
+  "type": "module",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
+  "files": [
+    "dist",
+    "config.example.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "discord",
+    "discord-bot",
+    "notifications",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.25",
+    "@opencode-ai/sdk": "^1.18.25",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "license": "MIT"
+}

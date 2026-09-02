@@ -1,0 +1,5 @@
+{
+  "discordBotToken": "YOUR_BOT_TOKEN_HERE",
+  "discordChannelId": "123456789012345678",
+  "allowedUserId": "123456789012345678"
+}
