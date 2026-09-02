@@ -2,3 +2,7 @@ node_modules/
 dist/
 config.json
 *.log
+
+# Maintainer-only docs, deliberately not public
+summary.md
+HANDOFF.md
