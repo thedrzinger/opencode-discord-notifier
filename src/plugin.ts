@@ -1,7 +1,7 @@
 import { MessageFlags } from "discord.js";
 import type { Plugin } from "@opencode-ai/plugin";
 import { buildPermissionButtons, parsePermissionCustomId } from "./buttons.js";
-import { loadConfig, type NotifierConfig } from "./config.js";
+import { loadConfig, NotConfiguredError, type NotifierConfig } from "./config.js";
 import { createDiscordNotifier, type Notifier } from "./discord.js";
 import {
   appendPermissionOutcome,
@@ -53,6 +53,16 @@ export const DiscordNotifierPlugin: Plugin = async ({ project, directory, worktr
     config = loadConfig();
     notifier = await createDiscordNotifier(config);
   } catch (err) {
+    if (err instanceof NotConfiguredError) {
+      // Expected right after installing the plugin, before the user has
+      // set up a config file or env vars — not a failure, so no error-level
+      // log and no toast (which would otherwise pop an alarming "failed to
+      // start" message on every single startup of an intentionally-not-yet
+      // -configured plugin).
+      await client.app.log({ body: { service: SERVICE, level: "info", message: err.message } }).catch(() => {});
+      return {};
+    }
+
     const message = `failed to start: ${err instanceof Error ? err.message : String(err)}`;
     await logError(message);
     // Also try a TUI toast for the realistic case (a real interactive

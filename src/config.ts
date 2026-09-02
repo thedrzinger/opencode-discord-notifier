@@ -25,21 +25,26 @@ type RawConfigFile = Partial<{
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "opencode-discord-notifier");
 const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, "config.json");
 
+// Thrown only when nothing was ever configured (no env vars, no config
+// file) — the expected state right after installing the plugin, not a
+// real problem. Kept distinct from other config errors (bad JSON, a field
+// missing from an actual config file) so the caller can treat "not set up
+// yet" as informational rather than an alarming failure.
+export class NotConfiguredError extends Error {}
+
 // Discord snowflake IDs are 64-bit and exceed Number.MAX_SAFE_INTEGER, so a
 // bare JSON number silently loses precision. Always read IDs as strings.
 function asString(value: unknown, field: string, configPath: string): string {
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number") {
     throw new Error(
-      `opencode-discord-notifier: config field "${field}" must be a string, not a number ` +
+      `opencode-discord-notifier: config field \`${field}\` must be a string, not a number ` +
         `(Discord IDs are too large for JSON numbers to hold precisely — quote it: "${field}": "${value}")`,
     );
   }
   throw new Error(
-    `opencode-discord-notifier: missing or invalid config field "${field}".\n` +
-      `Expected either the DISCORD_BOT_TOKEN / DISCORD_CHANNEL_ID / DISCORD_ALLOWED_USER_ID ` +
-      `environment variables, or a config file at:\n  ${configPath}\n` +
-      `containing: {"discordBotToken": "...", "discordChannelId": "...", "allowedUserId": "..."}`,
+    `opencode-discord-notifier: config field \`${field}\` is missing or invalid in ${configPath}\n` +
+      `Expected: {"discordBotToken": "...", "discordChannelId": "...", "allowedUserId": "..."}`,
   );
 }
 
@@ -60,9 +65,20 @@ export function loadConfig(): NotifierConfig {
     allowedUserId: process.env.DISCORD_ALLOWED_USER_ID,
   };
 
-  const haveAllEnv = fromEnv.discordBotToken && fromEnv.discordChannelId && fromEnv.allowedUserId;
+  const haveAllEnv = Boolean(fromEnv.discordBotToken && fromEnv.discordChannelId && fromEnv.allowedUserId);
   const path = configFilePath();
-  const source: RawConfigFile = haveAllEnv ? fromEnv : (loadConfigFile(path) ?? {});
+  const fileContents = haveAllEnv ? null : loadConfigFile(path);
+
+  if (!haveAllEnv && fileContents === null) {
+    throw new NotConfiguredError(
+      `opencode-discord-notifier is not configured yet — create ${path} ` +
+        `(see this package's config.example.json) or set the ` +
+        "`DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` and `DISCORD_ALLOWED_USER_ID` " +
+        "environment variables. See the plugin's README for setup steps.",
+    );
+  }
+
+  const source: RawConfigFile = haveAllEnv ? fromEnv : (fileContents ?? {});
 
   return {
     discordBotToken: asString(source.discordBotToken, "discordBotToken", path),
