@@ -20,10 +20,11 @@ type RawConfigFile = Partial<{
 // cache directory (observed: ~/.cache/opencode/packages/<name>) — not
 // somewhere a user would think to look for a secrets file, and not
 // guaranteed to survive a cache clear or version bump. A stable, documented
-// location independent of install mechanism is required instead, matching
-// the convention OpenCode itself uses for its own config (~/.config/opencode/).
-const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "opencode-discord-notifier");
-const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, "config.json");
+// location independent of install mechanism is required instead. Lives
+// directly in OpenCode's own config directory (~/.config/opencode/),
+// named after this plugin so it's unambiguous alongside OpenCode's own
+// config file and any other plugin's config in the same directory.
+const DEFAULT_CONFIG_PATH = join(homedir(), ".config", "opencode", "opencode-discord-notifier.json");
 
 // Thrown only when nothing was ever configured (no env vars, no config
 // file) — the expected state right after installing the plugin, not a

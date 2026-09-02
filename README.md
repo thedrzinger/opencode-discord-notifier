@@ -41,7 +41,7 @@ privileged Message Content intent is not required.
 2. Start `opencode` once so it fetches/loads the plugin.
 3. Create the config file at:
    ```
-   ~/.config/opencode-discord-notifier/config.json
+   ~/.config/opencode/opencode-discord-notifier.json
    ```
    using `config.example.json` as the template:
    ```json
@@ -55,11 +55,13 @@ privileged Message Content intent is not required.
    numbers — Discord IDs are too large for JSON numbers to hold without
    losing precision.
 
-   This location is deliberately **not** inside wherever `opencode`
-   installs/caches the plugin package itself (that location varies and
-   isn't guaranteed to survive an update) — it's a fixed path independent
-   of how the plugin got installed, matching the convention OpenCode
-   itself uses for its own config (`~/.config/opencode/`).
+   This lives directly in OpenCode's own config directory
+   (`~/.config/opencode/`), named after this plugin so it's easy to tell
+   apart from OpenCode's own config file and any other plugin's config
+   sitting in the same directory. It's deliberately **not** inside
+   wherever `opencode` installs/caches the plugin package itself (that
+   location varies and isn't guaranteed to survive an update) — this is a
+   fixed path independent of how the plugin got installed.
 
    Alternatives:
    - Set `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID`, and
