@@ -4,7 +4,9 @@ import { join } from "node:path";
 
 export type NotifierConfig = {
   discordBotToken: string;
-  discordChannelId: string;
+  // Omitted entirely means DM mode: messages go to allowedUserId directly
+  // instead of a server channel (see discord.ts's getChannel()).
+  discordChannelId?: string;
   allowedUserId: string;
 };
 
@@ -49,6 +51,22 @@ function asString(value: unknown, field: string, configPath: string): string {
   );
 }
 
+// discordChannelId is the one optional field: leaving it unset means DM
+// mode (see NotifierConfig). An empty string is treated the same as unset
+// rather than an error, so someone clearing the value out of a config
+// file doesn't need to delete the whole line.
+function asOptionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value.length > 0 ? value : undefined;
+  if (typeof value === "number") {
+    throw new Error(
+      `opencode-discord-notifier: config field \`${field}\` must be a string, not a number ` +
+        `(Discord IDs are too large for JSON numbers to hold precisely — quote it: "${field}": "${value}")`,
+    );
+  }
+  throw new Error(`opencode-discord-notifier: config field \`${field}\` must be a string if present`);
+}
+
 function configFilePath(): string {
   return process.env.OPENCODE_DISCORD_NOTIFIER_CONFIG || DEFAULT_CONFIG_PATH;
 }
@@ -66,24 +84,27 @@ export function loadConfig(): NotifierConfig {
     allowedUserId: process.env.DISCORD_ALLOWED_USER_ID,
   };
 
-  const haveAllEnv = Boolean(fromEnv.discordBotToken && fromEnv.discordChannelId && fromEnv.allowedUserId);
+  // discordChannelId is deliberately excluded here: it's optional (DM
+  // mode), so its presence/absence shouldn't decide whether env vars vs.
+  // the config file gets used — only the two always-required fields do.
+  const haveRequiredEnv = Boolean(fromEnv.discordBotToken && fromEnv.allowedUserId);
   const path = configFilePath();
-  const fileContents = haveAllEnv ? null : loadConfigFile(path);
+  const fileContents = haveRequiredEnv ? null : loadConfigFile(path);
 
-  if (!haveAllEnv && fileContents === null) {
+  if (!haveRequiredEnv && fileContents === null) {
     throw new NotConfiguredError(
       `opencode-discord-notifier is not configured yet — create ${path} ` +
         `(see this package's config.example.json) or set the ` +
-        "`DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` and `DISCORD_ALLOWED_USER_ID` " +
+        "`DISCORD_BOT_TOKEN` and `DISCORD_ALLOWED_USER_ID` " +
         "environment variables. See the plugin's README for setup steps.",
     );
   }
 
-  const source: RawConfigFile = haveAllEnv ? fromEnv : (fileContents ?? {});
+  const source: RawConfigFile = haveRequiredEnv ? fromEnv : (fileContents ?? {});
 
   return {
     discordBotToken: asString(source.discordBotToken, "discordBotToken", path),
-    discordChannelId: asString(source.discordChannelId, "discordChannelId", path),
+    discordChannelId: asOptionalString(source.discordChannelId, "discordChannelId"),
     allowedUserId: asString(source.allowedUserId, "allowedUserId", path),
   };
 }

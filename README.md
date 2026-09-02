@@ -22,12 +22,16 @@ Both notify-only and the interactive buttons are built and live-tested.
 
 ## Prerequisites
 
-A Discord bot application and token, invited to a server (or available
-for DMs) with permission to send messages in the channel you want
-notifications in. Setting one up is a standard Discord Developer Portal
-flow — not covered here, plenty of existing guides for it. This plugin
-only needs the `Guilds` intent; it doesn't read message content, so the
-privileged Message Content intent is not required.
+A Discord bot application and token. Setting one up is a standard Discord
+Developer Portal flow — not covered here, plenty of existing guides for
+it. This plugin only needs the `Guilds` intent; it doesn't read message
+content, so the privileged Message Content intent is not required.
+
+The bot needs to share at least one server with you — either invited to
+a real server channel you want notifications posted in, or (for DM mode,
+below) just a mutual server so it's allowed to DM you at all. Discord
+blocks bots from cold-DMing someone with no server in common, so this is
+required either way, even if you never post in that server's channels.
 
 ## Setup
 
@@ -50,9 +54,9 @@ privileged Message Content intent is not required.
      "allowedUserId": "123456789012345678"
    }
    ```
-   **All three must be strings**, even though two of them look like
-   numbers — Discord IDs are too large for JSON numbers to hold without
-   losing precision.
+   **All fields present must be strings**, even though two of them look
+   like numbers — Discord IDs are too large for JSON numbers to hold
+   without losing precision.
 
    This lives directly in OpenCode's own config directory
    (`~/.config/opencode/`), named after this plugin so it's easy to tell
@@ -62,10 +66,26 @@ privileged Message Content intent is not required.
    location varies and isn't guaranteed to survive an update) — this is a
    fixed path independent of how the plugin got installed.
 
+   **Want a DM instead of a server channel?** Just leave out
+   `discordChannelId` entirely:
+   ```json
+   {
+     "discordBotToken": "your-bot-token",
+     "allowedUserId": "123456789012345678"
+   }
+   ```
+   With no `discordChannelId` configured, every message goes as a direct
+   message to `allowedUserId` instead — no separate DM-channel ID to look
+   up, the bot creates the DM automatically the first time it sends. The
+   bot still needs to share a server with you for that first DM to go
+   through (see Prerequisites above) — it just doesn't need permission to
+   post in any of that server's channels.
+
    Alternatives:
-   - Set `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID`, and
-     `DISCORD_ALLOWED_USER_ID` as environment variables instead of using a
-     config file (checked first, before the file).
+   - Set `DISCORD_BOT_TOKEN` and `DISCORD_ALLOWED_USER_ID` (plus
+     `DISCORD_CHANNEL_ID` if you're not using DM mode) as environment
+     variables instead of using a config file (checked first, before the
+     file).
    - Point at a config file somewhere else with the
      `OPENCODE_DISCORD_NOTIFIER_CONFIG` environment variable.
 4. Restart any running `opencode` process — plugins (and config) are only

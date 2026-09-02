@@ -24,6 +24,18 @@ export async function createDiscordNotifier(config: NotifierConfig): Promise<Not
 
   async function getChannel(): Promise<SendableChannel> {
     if (channel) return channel;
+
+    // No discordChannelId configured means DM mode: send straight to
+    // allowedUserId instead of a server channel. User#send() creates the
+    // DM channel on demand — no separate DM-channel ID needed. Discord
+    // still requires a mutual server between the bot and the user for the
+    // first DM to go through (a bot can't cold-DM an arbitrary user).
+    if (!config.discordChannelId) {
+      const user = await client.users.fetch(config.allowedUserId);
+      channel = user as SendableChannel;
+      return channel;
+    }
+
     const fetched = await client.channels.fetch(config.discordChannelId);
     if (!fetched || !fetched.isTextBased() || !("send" in fetched)) {
       throw new Error(
