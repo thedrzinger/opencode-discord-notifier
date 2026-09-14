@@ -1,204 +1,200 @@
 import { MessageFlags } from "discord.js";
-import type { Plugin } from "@opencode-ai/plugin";
+import { define, type Context } from "@opencode/plugin/promise/plugin";
 import { buildPermissionButtons, parsePermissionCustomId } from "./buttons.js";
 import { loadConfig, NotConfiguredError, type NotifierConfig } from "./config.js";
 import { createDiscordNotifier, type Notifier } from "./discord.js";
 import {
   appendPermissionOutcome,
+  formatExecutionSucceeded,
+  formatFormCreated,
   formatPermissionAsked,
-  formatQuestionPending,
-  formatSessionIdle,
   projectLabel,
 } from "./format.js";
 
 const SERVICE = "opencode-discord-notifier";
 
-// client.tui.* calls (e.g. showToast) block indefinitely with no real TUI
-// attached — confirmed live for both showToast and tui.control.next(). A
-// plain .catch() does NOT protect against this, since the promise never
-// rejects, it just never resolves. Any client.tui.* call from this plugin
-// MUST be raced against a hard timeout, or a headless/API-driven session
-// (or a TUI that hasn't finished attaching yet) can hang plugin
-// initialization forever.
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  return Promise.race([promise, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
+// v1's client.app.log() wrote into OpenCode's own persistent log because
+// plain console output never reached anywhere a user could see it. Under v2,
+// confirmed live that console.error output from a plugin running in the
+// interactive TUI's server subprocess does NOT reliably surface anywhere
+// (not the terminal, not the log file) — unlike one-shot `opencode run`,
+// where it does. No reliable log destination found for the interactive
+// path; errors here are best-effort only.
+function logError(message: string) {
+  console.error(`[${SERVICE}] ${message}`);
 }
 
-function findQuestionPart(properties: any): any | null {
-  const candidates: any[] = [];
-  if (properties?.part) candidates.push(properties.part);
-  if (Array.isArray(properties?.info?.parts)) candidates.push(...properties.info.parts);
-  for (const part of candidates) {
-    if (part?.type === "tool" && part?.tool === "question") return part;
-  }
-  return null;
-}
+// v2 boots a separate "location" context per directory it sees a client
+// connect from — confirmed live: a single `opencode` invocation in a project
+// directory produces both a project-directory location AND a bare-home-
+// directory location, and a globally-configured plugin like this one gets
+// setup() called once per location, all within the same process. Without a
+// guard, that means N independent Discord clients, each reacting to the same
+// global event stream — confirmed live as duplicate Discord messages and a
+// race between instances answering the same button click (one succeeds, the
+// other gets a stale "permission not found"). Module-level state is safe
+// here because every location's plugin instance runs in the same process.
+let active: { readonly directory: string } | undefined;
 
-export const DiscordNotifierPlugin: Plugin = async ({ project, directory, worktree, client }) => {
-  // Plain console.error/console.log from inside a plugin never reaches
-  // anywhere a user would see it — confirmed live: even an unconditional
-  // console.error at the very top of this function, with a valid config,
-  // produced zero output in the host process's captured stdout/stderr.
-  // client.app.log() is the real, working alternative: it writes into
-  // OpenCode's own persistent log (~/.local/share/opencode/log/opencode.log),
-  // confirmed live, tagged with `service` so it's greppable.
-  async function logError(message: string) {
-    console.error(`[${SERVICE}] ${message}`);
-    await client.app.log({ body: { service: SERVICE, level: "error", message } }).catch(() => {});
-  }
-
-  let config: NotifierConfig;
-  let notifier: Notifier;
-  try {
-    config = loadConfig();
-    notifier = await createDiscordNotifier(config);
-  } catch (err) {
-    if (err instanceof NotConfiguredError) {
-      // Expected right after installing the plugin, before the user has
-      // set up a config file or env vars — not a failure, so no error-level
-      // log and no toast (which would otherwise pop an alarming "failed to
-      // start" message on every single startup of an intentionally-not-yet
-      // -configured plugin).
-      await client.app.log({ body: { service: SERVICE, level: "info", message: err.message } }).catch(() => {});
-      return {};
+export default define({
+  id: SERVICE,
+  async setup(context: Context) {
+    if (active) {
+      logError(
+        `skipping duplicate instance for location ${context.location.directory} — already active for ${active.directory}`,
+      );
+      return;
     }
+    // Claim the slot synchronously, before any await — JS's single-threaded
+    // execution makes this check-and-claim atomic. Claiming it only after
+    // createDiscordNotifier() resolves (as a first attempt at this guard
+    // did) left a real race: two locations' setup() calls can both pass the
+    // `if (active)` check before either finishes its async login, since
+    // neither has claimed the slot yet — confirmed live as two Discord
+    // clients both getting created despite the guard.
+    active = { directory: context.location.directory };
 
-    const message = `failed to start: ${err instanceof Error ? err.message : String(err)}`;
-    await logError(message);
-    // Also try a TUI toast for the realistic case (a real interactive
-    // session watching the terminal) — best-effort. MUST be time-boxed:
-    // this call hangs forever with no TUI attached (confirmed live), so
-    // a bare .catch() alone would leave plugin init hung indefinitely.
-    await withTimeout(
-      client.tui.showToast({ body: { title: "Discord notifier failed to start", message, variant: "error" } }).catch(() => {}),
-      2000,
-    );
-    // Degrade gracefully: return a no-op plugin rather than throwing,
-    // so the rest of OpenCode is unaffected by a misconfigured notifier.
-    return {};
-  }
-
-  const label = projectLabel(directory, worktree ?? project?.worktree);
-  const notifiedQuestionIds = new Set<string>();
-  // Permission IDs this specific plugin instance actually sent a
-  // notification for. Discord broadcasts every button click to every
-  // connected session on this bot token (confirmed live), so this set is
-  // what lets each concurrent `opencode` session only act
-  // on its own pending permissions. Entries are kept for the process's
-  // lifetime (not deleted after one click) so a second/duplicate click on
-  // an already-answered permission still routes through the real API call
-  // and gets a clean "already answered" response, rather than being
-  // silently dropped as "not mine."
-  const ownedPermissions = new Set<string>();
-
-  async function safeSend(content: string, components?: Parameters<typeof notifier.send>[1]) {
+    let config: NotifierConfig;
+    let notifier: Notifier;
     try {
-      await notifier.send(content, components);
+      config = loadConfig();
+      notifier = await createDiscordNotifier(config);
     } catch (err) {
-      await logError(`failed to send Discord message: ${String(err)}`);
-    }
-  }
-
-  notifier.onButtonClick(async (interaction) => {
-    const parsed = parsePermissionCustomId(interaction.customId);
-    if (!parsed) return; // not one of our buttons
-
-    if (!ownedPermissions.has(parsed.permissionId)) {
-      // Not this instance's pending permission. Either a different
-      // concurrent `opencode` session owns it, or the message is stale.
-      // Deliberately do nothing — no ack, no reply — so the owning
-      // instance (if any) is the only one that responds.
+      active = undefined; // release the slot so a later location can take over
+      if (err instanceof NotConfiguredError) {
+        // Expected right after installing the plugin, before the user has
+        // set up a config file or env vars — not a failure.
+        return;
+      }
+      logError(`failed to start: ${err instanceof Error ? err.message : String(err)}`);
+      // Degrade gracefully: no-op rather than throwing, so the rest of
+      // OpenCode is unaffected by a misconfigured notifier.
       return;
     }
+    active = { directory: context.location.directory };
 
-    if (String(interaction.user.id) !== config.allowedUserId) {
-      await interaction
-        .reply({ content: "You're not authorized to respond to this.", flags: MessageFlags.Ephemeral })
-        .catch((err) => logError(`failed to send unauthorized notice: ${String(err)}`));
-      return;
+    const label = projectLabel(context.location.directory, context.location.project.canonical);
+    const notifiedFormIds = new Set<string>();
+    // Permission IDs this specific plugin instance actually sent a
+    // notification for. Discord broadcasts every button click to every
+    // connected session on this bot token (confirmed live under v1, and the
+    // underlying Discord behavior hasn't changed), so this set is what lets
+    // each concurrent `opencode` session only act on its own pending
+    // permissions. Entries are kept for the process's lifetime (not deleted
+    // after one click) so a second/duplicate click on an already-answered
+    // permission still routes through the real API call and gets a clean
+    // "already answered" response, rather than being silently dropped as
+    // "not mine."
+    const ownedPermissions = new Set<string>();
+
+    async function safeSend(content: string, components?: Parameters<typeof notifier.send>[1]) {
+      try {
+        await notifier.send(content, components);
+      } catch (err) {
+        logError(`failed to send Discord message: ${String(err)}`);
+      }
     }
 
-    // Ack Discord immediately — never wait on the OpenCode round-trip
-    // first, or a slow reply produces a hard "did not respond" error
-    // even though the click was received (confirmed live).
-    await interaction.deferUpdate();
+    notifier.onButtonClick(async (interaction) => {
+      const parsed = parsePermissionCustomId(interaction.customId);
+      if (!parsed) return; // not one of our buttons
 
-    const originalContent = interaction.message.content;
-    let newContent: string;
-    try {
-      const result = await client.postSessionIdPermissionsPermissionId({
-        path: { id: parsed.sessionId, permissionID: parsed.permissionId },
-        body: { response: parsed.action },
-      });
-      // The SDK returns {data, error} and does NOT throw on failure —
-      // confirmed live. Checking result.error explicitly is required;
-      // try/catch alone would miss this.
-      if (result.error) {
-        const tag = (result.error as any)?._tag;
-        if (tag === "PermissionNotFoundError") {
+      if (!ownedPermissions.has(parsed.permissionId)) {
+        // Not this instance's pending permission. Either a different
+        // concurrent `opencode` session owns it, or the message is stale.
+        // Deliberately do nothing — no ack, no reply — so the owning
+        // instance (if any) is the only one that responds.
+        return;
+      }
+
+      if (String(interaction.user.id) !== config.allowedUserId) {
+        await interaction
+          .reply({ content: "You're not authorized to respond to this.", flags: MessageFlags.Ephemeral })
+          .catch((err) => logError(`failed to send unauthorized notice: ${String(err)}`));
+        return;
+      }
+
+      // Ack Discord immediately — never wait on the OpenCode round-trip
+      // first, or a slow reply produces a hard "did not respond" error
+      // even though the click was received (confirmed live under v1).
+      await interaction.deferUpdate();
+
+      const originalContent = interaction.message.content;
+      let newContent: string;
+      try {
+        // v2's reply() returns Promise<void> and throws on failure — the raw
+        // parsed error body (e.g. {_tag: "PermissionNotFoundError"}), not
+        // v1's {data, error} shape. Same _tag check, now via catch.
+        await context.permission.reply({
+          sessionID: parsed.sessionId,
+          requestID: parsed.permissionId,
+          reply: parsed.action,
+        });
+        newContent = appendPermissionOutcome(originalContent, { kind: "success", action: parsed.action });
+      } catch (err) {
+        // v2's reply() throws the raw parsed error body on failure (e.g.
+        // {_tag: "PermissionNotFoundError", message: "..."}), not v1's
+        // {data, error} shape — same case this always handled, just via
+        // catch now. Matching on message content too, not just _tag: with
+        // the setup() singleton guard now in place there should only ever
+        // be one instance replying, but a genuine double-click (or a
+        // keyboard answer racing a Discord click) can still hit this.
+        const tag = (err as any)?._tag;
+        const message = (err as any)?.message ?? String(err);
+        if (tag === "PermissionNotFoundError" || /not found/i.test(message)) {
           newContent = appendPermissionOutcome(originalContent, { kind: "already-answered" });
         } else {
-          const message = (result.error as any)?.message ?? JSON.stringify(result.error);
           newContent = appendPermissionOutcome(originalContent, { kind: "error", message });
         }
-      } else {
-        newContent = appendPermissionOutcome(originalContent, { kind: "success", action: parsed.action });
       }
-    } catch (err) {
-      newContent = appendPermissionOutcome(originalContent, { kind: "error", message: String(err) });
-    }
 
-    await interaction
-      .editReply({ content: newContent, components: [] })
-      .catch((err) => logError(`failed to edit message after button click: ${String(err)}`));
-  });
+      await interaction
+        .editReply({ content: newContent, components: [] })
+        .catch((err) => logError(`failed to edit message after button click: ${String(err)}`));
+    });
 
-  return {
-    // `event` is typed loosely here on purpose: live testing showed the
-    // real server emits event types ("permission.asked", "question.asked")
-    // that don't appear in @opencode-ai/sdk's published Event union at
-    // all. Matching on the raw string is the reliable path.
-    async event(input: { event: { type: string; properties?: any } }) {
-      const event = input.event;
+    // v1 was a hook the host called per-event. v2's event API is a pull-based
+    // async iterable instead, so the plugin owns its own subscription loop.
+    const controller = new AbortController();
+    (async () => {
       try {
-        if (event.type === "permission.asked") {
-          const sessionId = event.properties?.sessionID;
-          const permissionId = event.properties?.id;
-          if (sessionId && permissionId) {
-            ownedPermissions.add(permissionId);
-            const buttons = buildPermissionButtons(sessionId, permissionId);
-            await safeSend(formatPermissionAsked(event.properties, label), [buttons]);
-          } else {
-            await logError(`permission.asked event missing sessionID/id, notifying without buttons: ${JSON.stringify(event.properties)}`);
-            await safeSend(formatPermissionAsked(event.properties, label));
-          }
-          return;
-        }
-
-        if (event.type === "session.idle") {
-          await safeSend(formatSessionIdle(label));
-          return;
-        }
-
-        if (event.type === "message.part.updated" || event.type === "message.updated") {
-          const part = findQuestionPart(event.properties);
-          if (part?.state?.status === "pending") {
-            const id = part.id ?? part.callID;
-            if (id && !notifiedQuestionIds.has(id)) {
-              notifiedQuestionIds.add(id);
-              await safeSend(formatQuestionPending(part, label));
+        for await (const event of context.event.subscribe({ signal: controller.signal })) {
+          try {
+            if (event.type === "permission.asked") {
+              const { sessionID, id: permissionId } = event.data;
+              ownedPermissions.add(permissionId);
+              const buttons = buildPermissionButtons(sessionID, permissionId);
+              await safeSend(formatPermissionAsked(event.data, label), [buttons]);
+              continue;
             }
+
+            if (event.type === "session.execution.succeeded") {
+              await safeSend(formatExecutionSucceeded(label));
+              continue;
+            }
+
+            if (event.type === "form.created") {
+              const form = event.data.form;
+              if (!notifiedFormIds.has(form.id)) {
+                notifiedFormIds.add(form.id);
+                await safeSend(formatFormCreated(form, label));
+              }
+            }
+          } catch (err) {
+            logError(`error handling event ${event.type}: ${String(err)}`);
           }
         }
       } catch (err) {
-        await logError(`error handling event ${event.type}: ${String(err)}`);
+        if (!controller.signal.aborted) {
+          logError(`event subscription ended unexpectedly: ${String(err)}`);
+        }
       }
-    },
+    })();
 
-    async dispose() {
+    return async () => {
+      controller.abort();
       await notifier.destroy().catch((err) => logError(`error during dispose: ${String(err)}`));
-    },
-  };
-};
-
-export default DiscordNotifierPlugin;
+      if (active?.directory === context.location.directory) active = undefined;
+    };
+  },
+});

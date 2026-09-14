@@ -1,20 +1,20 @@
 import { basename } from "node:path";
 
-// The real event payloads observed live diverge from the published SDK
-// types (see project notes) — these are intentionally loose/defensive
-// rather than typed against @opencode-ai/sdk's Event union.
-
 export function projectLabel(directory: string | undefined, worktree: string | undefined): string {
   const path = worktree ?? directory;
   return path ? basename(path) : "unknown project";
 }
 
-export function formatPermissionAsked(properties: any, label: string): string {
-  const command: string | undefined = properties?.metadata?.command;
-  const patterns: string[] | undefined = properties?.patterns;
-  const detail = command ?? patterns?.join(", ") ?? properties?.permission ?? "an action";
-  const kind = properties?.permission ?? "permission";
-  return `🔐 **Permission needed** in \`${label}\`\n${kind}: \`${detail}\``;
+// v2's PermissionAsked.data shape — see @opencode/client's generated types.
+// Deliberately not importing the type itself (would add @opencode/client as
+// a direct dependency just for one type); the shape is stable/documented now,
+// unlike v1 where it had to be treated as untyped.
+export function formatPermissionAsked(
+  data: { action: string; resources?: string[]; message?: string },
+  label: string,
+): string {
+  const detail = data.message ?? data.resources?.join(", ") ?? "an action";
+  return `🔐 **Permission needed** in \`${label}\`\n${data.action}: \`${detail}\``;
 }
 
 const ACTION_LABEL: Record<"once" | "always" | "reject", string> = {
@@ -36,21 +36,30 @@ export function appendPermissionOutcome(
   return `${originalContent}\n\n⚠️ Something went wrong: ${outcome.message}`;
 }
 
-export function formatSessionIdle(label: string): string {
+// v1 fired on a "session.idle" event. v2 doesn't appear to emit that event at
+// all — confirmed live: waited 45+ seconds of genuine post-response silence
+// with no session.idle ever arriving. "session.execution.succeeded" is what
+// actually fires exactly when the agent finishes its turn and hands control
+// back, which is the same moment v1's session.idle notification meant to
+// catch.
+export function formatExecutionSucceeded(label: string): string {
   return `✅ Session in \`${label}\` finished and is waiting for you.`;
 }
 
-export function formatQuestionPending(part: any, label: string): string {
-  const question = part?.state?.input?.questions?.[0];
-  const text: string = question?.question ?? "OpenCode has a question for you.";
-  const options: Array<{ label?: string; description?: string }> = question?.options ?? [];
-  const optionLines = options
-    .map((opt, i) => `  ${i + 1}. ${opt.label ?? "(option)"}${opt.description ? ` — ${opt.description}` : ""}`)
+// v1 detected a pending "question" tool-call part via an undocumented
+// heuristic (see git history). v2 formalized this as a first-class "form"
+// system (form.created event) — this targets that instead.
+export function formatFormCreated(
+  form: { title: string; fields: ReadonlyArray<{ key: string; title?: string }> },
+  label: string,
+): string {
+  const fieldLines = form.fields
+    .map((field, i) => `  ${i + 1}. ${field.title ?? field.key}`)
     .join("\n");
   return (
-    `❓ **Question pending** in \`${label}\`\n` +
-    `${text}` +
-    (optionLines ? `\n${optionLines}` : "") +
+    `❓ **Input needed** in \`${label}\`\n` +
+    `${form.title}` +
+    (fieldLines ? `\n${fieldLines}` : "") +
     `\n\nThis has to be answered from the keyboard — Discord can't answer it (see project notes).`
   );
 }
