@@ -42,10 +42,16 @@ required either way, even if you never post in that server's channels.
 
 1. Add the plugin to `opencode.json`:
    ```json
-   { "plugin": ["opencode-discord-notifier"] }
+   { "plugin": ["opencode-discord-notifier@legacy"] }
    ```
    (Or an absolute local path instead of the package name, if you're
    developing against a local clone rather than the published package.)
+
+   Pin to the `legacy` npm dist-tag, not the bare package name — an
+   unpinned `"opencode-discord-notifier"` resolves to whatever `latest`
+   currently is, which is the v2-only line. Confirmed live: OpenCode v1
+   rejects that build outright ("must default export an object with
+   `server()`").
 2. Start `opencode` once so it fetches/loads the plugin.
 3. Create the config file at:
    ```
