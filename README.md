@@ -1,5 +1,10 @@
 # opencode-discord-notifier
 
+> **This branch/version (0.1.x) targets OpenCode v1 (`opencode`) only.**
+> For OpenCode v2, use version `2.x` (npm dist-tag `latest`) or the
+> [`master`](../../tree/master) branch — the v1 and v2 plugin APIs are
+> different enough that they don't share one codebase.
+
 An OpenCode plugin that sends a Discord message when a running `opencode`
 CLI session needs you — a permission request, a pending question, or the
 session going idle after finishing work — and lets you answer a pending
